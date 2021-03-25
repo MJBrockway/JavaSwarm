@@ -77,8 +77,8 @@ public class SwarmModel {
       if (k.length() >= 4 && k.substring(0,4).equals("stab"))
         stabFac = Double.parseDouble(params.get(k));
       if (k.equals("perim_coord"))   perimDrctd = Boolean.parseBoolean(params.get(k));
-      if (k.equals("goalX")) goalX = Double.parseDouble(params.get(k));
-      if (k.equals("goalY")) goalY = Double.parseDouble(params.get(k));
+      if (k.toLowerCase().equals("goalx")) goalX = Double.parseDouble(params.get(k));
+      if (k.toLowerCase().equals("goaly")) goalY = Double.parseDouble(params.get(k));
     } //k
   } // setParams
   
