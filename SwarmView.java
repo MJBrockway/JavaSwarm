@@ -101,14 +101,15 @@ public class SwarmView extends JPanel implements
       else
         g.drawOval(gx, gy, 7, 7);
     }
-    if (chkCohLns.isSelected()) {
-      g.setColor(Color.darkGray);
+    if (chkCohLns.isSelected()) { 
       for (int  i=0; i<model.size; i++) 
-         for (int j=0; j<i; j++) 
-          if (model.nbrs[i][j] || model.nbrs[j][i])
+        for (int j=0; j<i; j++) 
+          if (model.nbrs[i][j] || model.nbrs[j][i]) {
+            g.setColor((model.onPerim[i] && model.onPerim[j])? Color.red:Color.gray);
             g.drawLine(
               (int)(model.getX(i)*scFact) + ORG, -(int)(model.getY(i)*scFact) + ORG,
               (int)(model.getX(j)*scFact) + ORG, -(int)(model.getY(j)*scFact) + ORG);
+          }
     }
   }
 
