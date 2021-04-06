@@ -222,9 +222,9 @@ public class SwarmView extends JPanel implements
   }
 
   /** Given a model, construct view and assemble it into a JFrame */
-  static void makeViewFrame(SwarmModel model) {
+  static void makeViewFrame(SwarmModel model, String name) {
     SwarmView view = new SwarmView(model);
-    JFrame frame = new JFrame("Swarm View");
+    JFrame frame = new JFrame("Swarm View - " + name);
     JScrollPane p = new JScrollPane(view);
     frame.add(p, BorderLayout.CENTER);
     frame.add(view.pnlCtrl, BorderLayout.WEST);
@@ -237,13 +237,18 @@ public class SwarmView extends JPanel implements
   }
 
   /********************************* Main ********************************/
-  public static void main(String[] args) throws IOException{
+  public static void main(String[] args)
+                     throws IOException, org.json.JSONException {
     if (args.length == 0) {
-      System.out.println("Usage: (java) SwarmView path-to-config");
+      System.out.println(
+        "Usage: (java -cp .:org.json.jar) SwarmView path-to-config [f]\n"
+        + "Use F option to choose flat rather than json format.");
       return;
     }
-    SwarmModel model = SwarmModel.loadSwarm(args[0]);
-    makeViewFrame(model);
+    if (args.length < 2 || args[1].charAt(0) != 'f')
+      makeViewFrame(SwarmModel.loadSwarmJson(args[0]), args[0]);
+    else
+      makeViewFrame(SwarmModel.loadSwarmFlat(args[0]), args[0]);
   } // end main
 
 } //end class

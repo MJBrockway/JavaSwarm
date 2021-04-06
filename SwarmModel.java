@@ -1,6 +1,7 @@
 import java.util.*; //List, ArrayList, Random
 import java.io.*;
-//import static java.util.Map.entry;
+import org.json.*; //Json support: org.json.jar needs to be in classpath
+import java.nio.file.*; //Path, Files
 
 public class SwarmModel {
   // Array accessor constants
@@ -80,6 +81,12 @@ public class SwarmModel {
       if (k.toLowerCase().equals("goalx")) goalX = Double.parseDouble(params.get(k));
       if (k.toLowerCase().equals("goaly")) goalY = Double.parseDouble(params.get(k));
     } //k
+    System.out.printf("cb = %.10f, kc = %.10f, pc = %.10f\n", cb, kc, pc);  
+    System.out.printf("rb = %.10f, kr = %.10f, pr = %.10f\n", rb, kr, pr);  
+    System.out.printf("goal = (%.10f,%.10f), kd = %.10f\n", goalX, goalY, kd);  
+    System.out.printf("ob = %.10f, ko = %.10f\n", ob, ko);  
+    System.out.printf("expRt = %.10f, sclg mode = %d\n", expRt, repMode);
+    System.out.printf("speed = %.10f, stb fct = %.10f\n", speed, stabFac);
   } // setParams
   
   /**
@@ -425,7 +432,7 @@ public class SwarmModel {
   }
 
   /** Unpack model data from a config file & build model */
-  public static SwarmModel loadSwarm(String path)
+  public static SwarmModel loadSwarmFlat(String path)
                     throws IOException, NumberFormatException {
     Map<String, String> params = new HashMap<String, String>();
     List<String> xLst = new ArrayList<String>(),
@@ -454,7 +461,47 @@ public class SwarmModel {
     for (String s: xLst) xs[xLst.indexOf(s)] = Double.parseDouble(s);
     for (String s: yLst) ys[yLst.indexOf(s)] = Double.parseDouble(s);
     return new SwarmModel(xs, ys, params); 
-  }
+  } //end loadSwarmFlat(..)
+
+  /** Unpack model data from a Json file & build model */
+  public static SwarmModel loadSwarmJson(String path) 
+           throws JSONException, IOException, NumberFormatException {
+    JSONObject json = new JSONObject(Files.readString(Path.of(path)));
+    
+    JSONObject jprms = json.getJSONObject("params");
+    Map<String, String> params = new HashMap<String, String>();
+    Iterator<String> itn = jprms.keys();    //Type-safety bug in org.json.jar!
+                    // RHS returns an Iterator rather than an Iterator<String>
+    while (itn.hasNext()) {
+      String key = itn.next();
+      String val = jprms.getString(key);
+      params.put(key, val);
+    }      
+
+    //Get params goalX, goalY from dests:coords if any are specified:
+    try {
+      JSONArray dsts = json.getJSONObject("destinations").getJSONArray("coords");
+      if (dsts.getJSONArray(0).length() > 0 && dsts.getJSONArray(1).length() > 0) {
+        params.put("goalX", dsts.getJSONArray(0).getString(0));
+        params.put("goalY", dsts.getJSONArray(1).getString(0));
+      }
+    } catch (JSONException ex) {
+      System.out.printf(
+        "%s: Missing or invalid destination spec; using defaults\n", ex);
+    }
+    
+    JSONArray crds = json.getJSONObject("agents").getJSONArray("coords"),
+              xCds = crds.getJSONArray(0), 
+              yCds = crds.getJSONArray(1);
+    double[] xs = new double[xCds.length()], ys = new double[yCds.length()];
+    assert (xs.length == ys.length);
+    for (int i=0 ; i<xs.length; i++) {
+      xs[i] = xCds.getDouble(i);
+      ys[i] = yCds.getDouble(i);
+    }
+
+    return new SwarmModel(xs, ys, params); 
+  } //end loadSwarmJson(..)
 
 } // end class
 
