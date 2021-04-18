@@ -17,7 +17,7 @@ import java.util.*;
 public class SwarmView extends JPanel implements
             MouseListener, MouseMotionListener, ActionListener, FocusListener {
   public static Color agentClr = Color.red.darker();
-  public static final int GSIZE = 2000, ORG = GSIZE/2, TmrInt=64;
+  public static final int GSIZE = 2000, ORG = GSIZE/2, tmrInt=64;
   double scFact = 20.0, sfMul = 5.0, stepSz;
   int stepNo = 1, runLim = 999999999;
   SwarmModel model;
@@ -32,7 +32,7 @@ public class SwarmView extends JPanel implements
 
   /** Constructor */
   public SwarmView(SwarmModel m) {
-    timer = new javax.swing.Timer(TmrInt, this);
+    timer = new javax.swing.Timer(tmrInt, this);
     model = m;
     addMouseListener(this); addMouseMotionListener(this);
 
@@ -49,7 +49,7 @@ public class SwarmView extends JPanel implements
     txtRunLim.setHorizontalAlignment(JTextField.CENTER);
     btnFstr = new JButton("Faster");  pnlCtrl.add(btnFstr);
     btnFstr.addActionListener(this);
-    lblTmrInt = new JLabel(String.format("%12d",TmrInt)); pnlCtrl.add(lblTmrInt);
+    lblTmrInt = new JLabel(String.format("%12d",tmrInt)); pnlCtrl.add(lblTmrInt);
     btnSlwr = new JButton("Slower");  pnlCtrl.add(btnSlwr);
     btnSlwr.addActionListener(this);
     btnZoomOut = new JButton("Zoom out");  pnlCtrl.add(btnZoomOut);
@@ -92,7 +92,7 @@ public class SwarmView extends JPanel implements
     g.drawLine(ORG,0,ORG,GSIZE);
 
     //Plot swarm
-    for (int i=0; i<model.size; i++) {
+    for (int i=0; i<model.swmSz; i++) {
       gx =  (int)(model.getX(i)*scFact) + ORG - 3;
       gy = -(int)(model.getY(i)*scFact) + ORG - 3;
       g.setColor(agentClr);
@@ -102,7 +102,7 @@ public class SwarmView extends JPanel implements
         g.drawOval(gx, gy, 7, 7);
     }
     if (chkCohLns.isSelected()) { 
-      for (int  i=0; i<model.size; i++) 
+      for (int  i=0; i<model.swmSz; i++) 
         for (int j=0; j<i; j++) 
           if (model.nbrs[i][j] || model.nbrs[j][i]) {
             g.setColor((model.onPerim[i] && model.onPerim[j])? Color.red:Color.gray);
@@ -130,17 +130,17 @@ public class SwarmView extends JPanel implements
     if (timer.isRunning())
       return;
     
-    for (int i = 0; i < model.size; i++) 
+    for (int i = 0; i < model.swmSz; i++) 
       if (Math.hypot(model.getX(i) * scFact +ORG - e.getX(),
                     -model.getY(i) * scFact +ORG - e.getY()) < 5) {
         System.out.printf("Agent %d at (%f, %f) has %d neighbours:\n\t",
           i, model.getX(i), model.getY(i), (int)model.state[model.COH_N][i]);
-        for (int j = 0; j < model.size; j++) 
+        for (int j = 0; j < model.swmSz; j++) 
           if (model.nbrs[i][j])
             System.out.printf(
               "%d:%f ∟ %.1f; ", j, model.dists[i][j], model.angles[i][j]*180/Math.PI);
         System.out.printf("\nRepellors for Agent %d:\n\t", i);
-        for (int j = 0; j < model.size; j++) 
+        for (int j = 0; j < model.swmSz; j++) 
           if (j != i && model.dists[j][i] <= model.erf[i][j])
             System.out.printf(
               "%d:%f ∟ %.1f; ", j, model.dists[i][j], model.angles[i][j]*180/Math.PI);
