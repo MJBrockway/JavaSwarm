@@ -31,14 +31,14 @@ public class SwarmModel {
           kd  = 0.0,        //master  direction weight
           ko  = 0.0,        //master  obstacle aviodance weight [not implemented here]
           kg  = 0.0,        // .aster gap reduction wt, default 0.0
-          pc  = 1.0,        //cohesion weight multiplier for perimeter agents (>= 1)
-          pr  = 1.0,        //repulsion weight multiplier for perimeter agents (<= 1)
-          pkr = 1.0,        //additional wt multiplier for prm/nonprm interactions
           expRt = 0.2,      //exponential rate (if rep mode == EXPTL)
           speed = 0.05,     //model time-step size
           stabFac = 0.0,    //minimum magnitude for RES to be applied
           goalX = 0.0,
           goalY = 0.0;      //goal coordinates
+  double[][] pr = {{1.0,1.0},{1.0,1.0}}, //repulsion radius multipliers
+            pkc = {{1.0,1.0},{1.0,1.0}}, //cohesion weight multipliers (usually >= 1)
+            pkr = {{1.0,1.0},{1.0,1.0}}; //repulsion weight multipliers
          
   int     repMode = LINEAR; //default repulsion calculation mode
   boolean perimDrctd = false;       //true => only perimeter agents direct swarm twd goal
@@ -56,8 +56,8 @@ public class SwarmModel {
               dists, angles,  // distance, polar angle of an agent relative to another
               ecb,            // effective cohesion range of i wrt j
               erf, ekc, ekr;  // effective repulsion range, cohesion, repulsion weights
-  boolean[][] nbrs;           // nbrs[i][j] <=> i is with effective coh range of j
-  boolean[] onPerim;          // onPerim[i] <=> i on perimeter    
+  boolean[][] nbrs;           // nbrs[i][j] <=> i is within effective coh range of j
+  int[] onPerim;              // onPerim[i] == 1 <=> i on perimeter, ow 0    
         
 
   private void setParams(Map<String, String> params) {
@@ -70,9 +70,9 @@ public class SwarmModel {
       if (k.equals("kd"))  kd = Double.parseDouble(params.get(k));
       if (k.equals("ko"))  ko = Double.parseDouble(params.get(k));
       if (k.equals("kg"))  kg = Double.parseDouble(params.get(k));
-      if (k.equals("pc"))  pc = Double.parseDouble(params.get(k));
-      if (k.equals("pr"))  pr = Double.parseDouble(params.get(k));
-      if (k.equals("pkr")) pkr = Double.parseDouble(params.get(k));
+      if (k.equals("pr"))  getDoubleArray(params.get(k), pr);
+      if (k.equals("pkc")) getDoubleArray(params.get(k), pkc);
+      if (k.equals("pkr")) getDoubleArray(params.get(k), pkr);
       if (k.equals("scaling")) {
         if (params.get(k).substring(0,4).equals("expo"))
           repMode = EXPTL;
@@ -88,14 +88,35 @@ public class SwarmModel {
       if (k.toLowerCase().equals("goalx")) goalX = Double.parseDouble(params.get(k));
       if (k.toLowerCase().equals("goaly")) goalY = Double.parseDouble(params.get(k));
     } //k
-    System.out.printf("cb = %.10f, kc = %.10f, pc = %.10f\n", cb, kc, pc);  
-    System.out.printf("rb = %.10f, kr = %.10f, pr = %.10f\n", rb, kr, pr);  
-    System.out.printf("            kg = %.10f, pkr = %.10f\n", kg, pkr);  
+    System.out.printf("cb = %.10f, kc = %.10f\n", cb, kc);  
+    System.out.printf("rb = %.10f, kr = %.10f, kg = %.10f\n", rb, kr, kg);  
+    System.out.printf("pr = %s\n", dispArray(pr));
+    System.out.printf("pkc = %s\n", dispArray(pkc));
+    System.out.printf("pkr = %s\n", dispArray(pkr));
     System.out.printf("goal = (%.10f,%.10f), kd = %.10f\n", goalX, goalY, kd);  
     System.out.printf("ob = %.10f, ko = %.10f\n", ob, ko);  
     System.out.printf("expRt = %.10f, sclg mode = %d\n", expRt, repMode);
     System.out.printf("speed = %.10f, stb fct = %.10f\n", speed, stabFac);
+    System.out.printf("perimeter directed = %s\n", perimDrctd? "true": "false");
   } // setParams
+  
+  /** Helper for setParams() - get a double[m][n] from a text string of doubles */
+  private void getDoubleArray(String source, double[][] target) {
+    Scanner sc = new Scanner(source);
+    for (int i = 0; i < target.length; i++)
+      for (int j = 0; j < target[i].length; j++)
+        target[i][j] = sc.nextDouble();     
+  }
+  
+  /** Helper - build display string for a double[][] */
+  public static String dispArray(double[][] xx) {
+    String s = "";
+    for (int i = 0; i < xx.length; i++)
+      for (int j = 0; j < xx[i].length; j++)
+        s += String.format("%.15f  ", xx[i][j]);
+    return s;
+  }
+
   
   /**
    Initialize state and working data structures: swarm of agents at (xs[], ys[]).
@@ -112,7 +133,7 @@ public class SwarmModel {
     swmSz = xs.length;
     // swarm state ...
     state = new double[N_ROWS][swmSz];     
-    onPerim = new boolean[swmSz];
+    onPerim = new int[swmSz];
     for (int i = 0; i < swmSz; i++) {
       state[POS_X][i] = xs[i];  state[POS_Y][i] = ys[i];
       state[COH_X][i]  = 0.0;   state[COH_Y][i] = 0.0; 
@@ -126,7 +147,7 @@ public class SwarmModel {
       state[PRM][i] = 0;
       state[GAP_X][i]  = 0.0;   state[GAP_Y][i] = 0.0; 
       state[COH_N][i]  = 0;   state[REP_N][i] = 0;
-      onPerim[i] = false;
+      onPerim[i] = 0;
     }
     //Inter-agent data (will be updated before use): 
     xDiff = new double[swmSz][swmSz];  yDiff  = new double[swmSz][swmSz]; //displacements 
@@ -206,21 +227,11 @@ public class SwarmModel {
     //(3) effective rep field radii, COH and REP weights
     for (int i = 0; i < swmSz; i++) {
       for (int j = 0; j < swmSz; j++) {
-        if (onPerim[i] && onPerim[j]) {
-          erf[i][j] = state[RF][i] * pr;
-          ekc[i][j] = state[KC][i] * pc;
-          ekr[i][j] = state[KR][i];
-        } else if (onPerim[i]) {
-          erf[i][j] = state[RF][i];
-          ekc[i][j] = state[KC][i];
-          ekr[i][j] = state[KR][i] * pkr;
-        } else {
-          erf[i][j] = state[RF][i];
-          ekc[i][j] = state[KC][i];
-          ekr[i][j] = state[KR][i];
-        }
-      } //j
-    } //i
+        erf[i][j] = state[RF][i] * pr[onPerim[i]][onPerim[j]];
+        ekc[i][j] = state[KC][i] * pkc[onPerim[i]][onPerim[j]];
+        ekr[i][j] = state[KR][i] * pkr[onPerim[i]][onPerim[j]];
+      }
+    }
   } //updtWorkingData()
 
 
@@ -231,12 +242,12 @@ public class SwarmModel {
    */
   void updateOnPerim() {
     for (int i = 0; i < swmSz; i++) {
-      onPerim[i] = false;
+      onPerim[i] = 0;
       state[GAP_X][i] = 0.0; state[GAP_Y][i] = 0.0;
       int k = (int)state[COH_N][i];
       if (k < 3) {
-        onPerim[i] = true;   //under 3 nbrs => perimeter
-        continue;            //next i
+        onPerim[i] = 1;   //under 3 nbrs => perimeter
+        continue;         //next i
       }
       int[] iNbrs = new int[k];  // //coh nbrs of agent i
       k = 0;
@@ -250,7 +261,7 @@ public class SwarmModel {
       for (int j = 0; j < iNbrs.length; j++) {
         k = (j+1) % iNbrs.length;
         if (!nbrs[iNbrs[k]][iNbrs[j]]) { 
-          onPerim[i] = true;  //two consec nbrs out of coh range => onPerim[i]
+          onPerim[i] = 1;  //two consec nbrs out of coh range => onPerim[i]
           state[GAP_X][i] = state[KG][i] *
             (0.5*(state[POS_X][iNbrs[k]] + state[POS_X][iNbrs[j]]) - state[POS_X][i]);
           state[GAP_Y][i] = state[KG][i] *
@@ -260,7 +271,7 @@ public class SwarmModel {
         double delta = angles[i][iNbrs[k]] - angles[i][iNbrs[j]];
         if (delta < 0) delta += Math.PI * 2;
         if (delta > Math.PI) { //two consec nbrs make a reflex angle
-          onPerim[i] = true;
+          onPerim[i] = 1;
           state[GAP_X][i] = state[KG][i] *
             (0.5*(state[POS_X][iNbrs[k]] + state[POS_X][iNbrs[j]]) - state[POS_X][i]);
           state[GAP_Y][i] = state[KG][i] *
@@ -270,7 +281,7 @@ public class SwarmModel {
       } // end for j
     } // end for i
     for (int i = 0; i < swmSz; i++)
-      state[PRM][i] = onPerim[i]? 1.0: 0.0;
+      state[PRM][i] = (double)onPerim[i];
   } // updateOnPerim()
 
   /** Helper: sort neighbours of agent i 
@@ -383,7 +394,7 @@ public class SwarmModel {
       state[DIR_Y][i] = state[KD][i]*(state[GOAL_Y][i] - state[POS_Y][i]);
 
       // Resultant of the cohesion, repulsion and direction vectors:
-      if (!perimDrctd || onPerim[i]) {
+      if (!perimDrctd || onPerim[i] == 1) {
         state[RES_X][i]
           = state[COH_X][i] + state[GAP_X][i] + state[REP_X][i] + state[DIR_X][i];
         state[RES_Y][i]
@@ -428,24 +439,25 @@ public class SwarmModel {
 
   void saveSwarm(String path) throws IOException {
     PrintWriter ptwr = new PrintWriter(new FileWriter(path));
-    ptwr.println(String.format("cb %.15f", cb));
-    ptwr.println(String.format("rb %.15f", rb));
-    ptwr.println(String.format("ob %.15f", ob));
-    ptwr.println(String.format("kc %.15f", kc));
-    ptwr.println(String.format("kr %.15f", kr));
-    ptwr.println(String.format("kd %.15f", kd));
-    ptwr.println(String.format("ko %.15f", ko));
-    ptwr.println(String.format("kc %.15f", kc));
-    ptwr.println(String.format("pc %.15f", pc));
-    ptwr.println(String.format("pr %.15f", pr));
-    ptwr.println(String.format("exp_rate %.15f", expRt));
-    ptwr.println(String.format("scaling %s",
+    ptwr.println(String.format("cb: %.15f", cb));
+    ptwr.println(String.format("rb: %.15f", rb));
+    ptwr.println(String.format("ob: %.15f", ob));
+    ptwr.println(String.format("kr: %.15f", kr));
+    ptwr.println(String.format("kd: %.15f", kd));
+    ptwr.println(String.format("ko: %.15f", ko));
+    ptwr.println(String.format("kc: %.15f", kc));
+    ptwr.println(String.format("kg: %.15f", kg));
+    ptwr.println(String.format("pr: %s", dispArray(pr)));
+    ptwr.println(String.format("pkc: %s", dispArray(pkc)));
+    ptwr.println(String.format("pkr: %s", dispArray(pkr)));
+    ptwr.println(String.format("exp:_rate %.15f", expRt));
+    ptwr.println(String.format("scaling: %s",
         repMode==2? "expo": (repMode==1?"quad":"linear")));
-    ptwr.println(String.format("speed %.15f", speed));
-    ptwr.println(String.format("stab %.15f", stabFac));
-    ptwr.println(String.format("goalX %.15f", goalX));
-    ptwr.println(String.format("goalY %.15f", goalY));
-    ptwr.println(String.format("perim_coord %b", perimDrctd));
+    ptwr.println(String.format("speed: %.15f", speed));
+    ptwr.println(String.format("stab: %.15f", stabFac));
+    ptwr.println(String.format("goalX: %.15f", goalX));
+    ptwr.println(String.format("goalY: %.15f", goalY));
+    ptwr.println(String.format("perim_coord: %b", perimDrctd));
     ptwr.println("# POS_X, POS_Y --");
     for (int i = 0; i < swmSz; i++)
       ptwr.println(String.format("%.15f  %.15f", state[POS_X][i], state[POS_Y][i]));
@@ -462,8 +474,9 @@ public class SwarmModel {
     String[] tokens;
     String line = fr.readLine();
     while (line != null && line.charAt(0) != '#') { //params section
-      tokens = line.split("\\s+");
+      tokens = line.split("\\s*:\\s*");
       params.put(tokens[0], tokens[1]);
+      System.out.println(tokens[0]+" - "+tokens[1]);
       line = fr.readLine();
     }
     if (line.charAt(0) == '#')
@@ -495,7 +508,7 @@ public class SwarmModel {
                     // RHS returns an Iterator rather than an Iterator<String>
     while (itn.hasNext()) {
       String key = itn.next();
-      String val = jprms.getString(key);
+      String val = dropPunctn(jprms.getString(key));
       params.put(key, val);
     }      
 
@@ -524,5 +537,21 @@ public class SwarmModel {
     return new SwarmModel(xs, ys, params); 
   } //end loadSwarmJson(..)
 
+  /** Helper for unpacking JSON: strip '[', ']' and replace ',' with space */  
+  static String dropPunctn(String s) {
+    StringBuilder sb = new StringBuilder(s);
+    int i = 0;
+    while (i < sb.length()) {
+      char c = sb.charAt(i); 
+      if (c == '[' || c == ']')
+        sb.deleteCharAt(i);
+      else {
+        if (c == ',') sb.setCharAt(i, ' ');
+        i++;
+      }
+    }
+    return sb.toString();
+  }
+ 
 } // end class
 

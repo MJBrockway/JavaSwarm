@@ -16,7 +16,7 @@ import java.util.*;
  */
 public class SwarmView extends JPanel implements
             MouseListener, MouseMotionListener, ActionListener, FocusListener {
-  public static Color agentClr = Color.red.darker();
+  public static Color agentClr = Color.black, prmClr = Color.red;
   public static final int GSIZE = 2000, ORG = GSIZE/2, tmrInt=64;
   double scFact = 20.0, sfMul = 5.0, stepSz;
   int stepNo = 1, runLim = 999999999;
@@ -93,19 +93,16 @@ public class SwarmView extends JPanel implements
 
     //Plot swarm
     for (int i=0; i<model.swmSz; i++) {
-      gx =  (int)(model.getX(i)*scFact) + ORG - 3;
-      gy = -(int)(model.getY(i)*scFact) + ORG - 3;
-      g.setColor(agentClr);
-      if (model.onPerim[i]) 
-        g.fillOval(gx, gy, 7, 7);
-      else
-        g.drawOval(gx, gy, 7, 7);
+      gx =  (int)(model.getX(i)*scFact) + ORG - 2;
+      gy = -(int)(model.getY(i)*scFact) + ORG - 2;
+      g.setColor(model.onPerim[i]==1? prmClr: agentClr);
+      g.drawOval(gx, gy, 5, 5);
     }
     if (chkCohLns.isSelected()) { 
       for (int  i=0; i<model.swmSz; i++) 
         for (int j=0; j<i; j++) 
           if (model.nbrs[i][j] || model.nbrs[j][i]) {
-            g.setColor((model.onPerim[i] && model.onPerim[j])? Color.red:Color.gray);
+            g.setColor((model.onPerim[i]==1 && model.onPerim[j]==1)? Color.red:Color.gray);
             g.drawLine(
               (int)(model.getX(i)*scFact) + ORG, -(int)(model.getY(i)*scFact) + ORG,
               (int)(model.getX(j)*scFact) + ORG, -(int)(model.getY(j)*scFact) + ORG);
