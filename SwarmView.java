@@ -95,14 +95,14 @@ public class SwarmView extends JPanel implements
     for (int i=0; i<model.swmSz; i++) {
       gx =  (int)(model.getX(i)*scFact) + ORG - 2;
       gy = -(int)(model.getY(i)*scFact) + ORG - 2;
-      g.setColor(model.onPerim[i]==1? prmClr: agentClr);
+      g.setColor(model.prm[i]==1? prmClr: agentClr);
       g.drawOval(gx, gy, 5, 5);
     }
     if (chkCohLns.isSelected()) { 
       for (int  i=0; i<model.swmSz; i++) 
         for (int j=0; j<i; j++) 
           if (model.nbrs[i][j] || model.nbrs[j][i]) {
-            g.setColor((model.onPerim[i]==1 && model.onPerim[j]==1)? Color.red:Color.gray);
+            g.setColor((model.prm[i]==1 && model.prm[j]==1)? Color.red:Color.gray);
             g.drawLine(
               (int)(model.getX(i)*scFact) + ORG, -(int)(model.getY(i)*scFact) + ORG,
               (int)(model.getX(j)*scFact) + ORG, -(int)(model.getY(j)*scFact) + ORG);
@@ -138,7 +138,7 @@ public class SwarmView extends JPanel implements
               "%d:%f ∟ %.1f; ", j, model.dists[i][j], model.angles[i][j]*180/Math.PI);
         System.out.printf("\nRepellors for Agent %d:\n\t", i);
         for (int j = 0; j < model.swmSz; j++) 
-          if (j != i && model.dists[j][i] <= model.erf[i][j])
+          if (model.repels[i][j])
             System.out.printf(
               "%d:%f ∟ %.1f; ", j, model.dists[i][j], model.angles[i][j]*180/Math.PI);
         System.out.println();
