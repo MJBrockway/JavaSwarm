@@ -4,152 +4,155 @@ import org.json.*; //Json support: org.json.jar needs to be in classpath
 import java.nio.file.*; //Path, Files
 
 public class SwarmModel {
-  // Array accessor constants
-  final int POS_X  = 0,   POS_Y  = 1,   // agents' position
-            COH_X  = 2,   COH_Y  = 3,   // cpts of cohesion vectors
-            REP_X  = 4,   REP_Y  = 5,   // cpts of repulsion vectors
-            DIR_X  = 6,   DIR_Y  = 7,   // cpts of direction vectors
-            RES_X  = 8,   RES_Y  = 9,   // cpts of of resultant vectors
-            GOAL_X = 10,  GOAL_Y = 11,  // cpts of  goals
-            PRM    = 12,                // agent known to be on perimeter of swarm
-            GAP_X  = 13,  GAP_Y  = 14,  // components of gap reduction vector
-            COH_N  = 15,  REP_N  = 16,  // num of cohesion, repulsion neighbours
 
-            N_ROWS = 17,    // number of rows in array that models swarm state
-  // Other constants          
-            LINEAR = 0, QUAD = 1, EXPTL = 2; //repulsion calcuation modes
+  /* Swarm state  ********************************************************/
+  int      swmSz;        //swarm size: all above arrays have this length
+  double[] posX,  posY,  // agents' position
+           cohX,  cohY,  // cpts of cohesion vectors
+           repX,  repY,  // cpts of repulsion vectors
+           dirX,  dirY,  // cpts of direction vectors
+           advX,  advY,  // cpts of adversarial vectors
+           gapX,  gapY,  // components of gap reduction vector
+           resX,  resY;  // cpts of of resultant vectors
 
-  // Swarm parameters
-  double[][] rb = {{1.0,1.0},{1.0,1.0}}, //repulsion radii
-             kc = {{1.0,1.0},{1.0,1.0}}, //cohesion weights
-             kr = {{1.0,1.0},{1.0,1.0}}; //repulsion weights
-  double  cb  = 4.0,        //master cohesion range (radius)
-          ob  = 0.0,        //master obstacle aviodance range 
-          kd  = 0.0,        //master  direction weight
-          ko  = 0.0,        //master  obstacle aviodance weight [not implemented here]
-          kg  = 0.0,        // .aster gap reduction wt, default 0.0
-          expRt = 0.2,      //exponential rate (if rep mode == EXPTL)
-          speed = 0.05,     //model time-step size
-          stabFac = 0.0,    //minimum magnitude for RES to be applied
-          goalX = 0.0,
-          goalY = 0.0;      //goal coordinates
-         
-  int     repMode = LINEAR;    //default repulsion calculation mode
-  boolean perimDrctd = false,  //true => only perimeter agents direct swarm twd goal
-          gapFillRflx = false; //true => consider a reflex angle a gap to be filled
+  int[]    prm,          // 0 or 1; 1 => agent known to be on perimeter of swarm
+           cohN,  repN;  // num of cohesion, repulsion neighbours
+
+  double getX(int i) { return posX[i]; }
+  double getY(int i) { return posY[i]; }
+
+  /* Other constants  ****************************************************/
+  int      LINEAR = 0, QUAD = 1, EXPTL = 2; //repulsion calculation modes
   final double snapRdg = Math.pow(10.0, 9); //in applyStep() snap x, y posns to 9 DP precision
 
 
-  double[][] state;   //state of swarm
-  int swmSz;
+  /* Swarm parameters ****************************************************/
+  double[][] rb = {{2.0,2.0},{2.0,2.0}},      //repulsion radii
+             kc = {{0.15,0.15},{0.15,0.15}},  //cohesion weights
+             kr = {{50.0,50.0},{50.0,50.0}};  //repulsion weights
+  double     cb  = 3.0,           //master cohesion range (radius)
+             goalX = 0.0, goalY = 0.0;
+  double[]   kd  = {0.0,0.0},     //master direction weight
+             ka  = {0.0,0.0};     //master adversarial weight 
+  double     kg  = 0.0,           //master gap reduction wt, default 0.0
+             expRt = 0.2,         //exponential rate (if rep mode == EXPTL)
+             speed = 0.05,        //model time-step size
+             stabFac = 0.0,       //minimum magnitude for RES to be applied
+             gain = Double.NaN;   //for linear (not normalised) model
+         
+  int     repMode = LINEAR;      //default repulsion calculation mode
 
-  double getX(int i) { return state[POS_X][i]; }
-  double getY(int i) { return state[POS_Y][i]; }
+  boolean   gapFillRflx = false; //true => (reflex angle => gap to be filled)
 
-  //Working structures --
+
+
+  /* Working data structures ***********************************************/
   double[][]  xDiff, yDiff,   // x- and y-displacements of one agent from another
               dists, angles;  // distance, polar angle of an agent relative to another
   boolean[][] nbrs;           // nbrs[i][j] <=> i is within coh range of j
   boolean[][] repels;         // repels[i][j] <=> i is repelled by j
-  int[] prm;                 // prm[i] == 1 <=> i on perimeter, ow 0    
-        
-  public String stateStg(int agtNo) {
-    StringBuilder sb = new StringBuilder();
-    for (int r = 0; r < N_ROWS; r++)
-      sb.append(String.format("%.10f  ", state[r][agtNo]));
-    return sb.toString();
-  }
 
+  /* initialisation ********************************************************/
   private void setParams(Map<String, String> params) {
-    for (String k: params.keySet()) {
-      if (k.equals("rb")) getDoubleArray(params.get(k), rb);
-      if (k.equals("kc")) getDoubleArray(params.get(k), kc);
-      if (k.equals("kr")) getDoubleArray(params.get(k), kr);
-      if (k.equals("cb"))  cb = Double.parseDouble(params.get(k));
-      if (k.equals("ob"))  ob = Double.parseDouble(params.get(k));
-      if (k.equals("kd"))  kd = Double.parseDouble(params.get(k));
-      if (k.equals("ko"))  ko = Double.parseDouble(params.get(k));
-      if (k.equals("kg"))  kg = Double.parseDouble(params.get(k));
-      if (k.equals("scaling")) {
-        if (params.get(k).substring(0,4).equals("expo"))
+    for (String ks: params.keySet()) {
+      if (ks.equals("rb"))  get2DArray(params.get(ks), rb);
+      if (ks.equals("kc"))  get2DArray(params.get(ks), kc);
+      if (ks.equals("kr"))  get2DArray(params.get(ks), kr);
+      if (ks.equals("cb"))  cb = Double.parseDouble(params.get(ks));
+      if (ks.equals("kd"))  get1DArray(params.get(ks), kd); 
+      if (ks.equals("ka"))  get1DArray(params.get(ks), ka); 
+      if (ks.equals("kg"))  kg = Double.parseDouble(params.get(ks));
+      if (ks.equals("scaling")) {
+        if (params.get(ks).substring(0,4).equals("expo"))
           repMode = EXPTL;
-        else if (params.get(k).substring(0,4).equals("quad"))
+        else if (params.get(ks).substring(0,4).equals("quad"))
           repMode = QUAD;
         //else LINEAR by default
       }
-      if (k.equals("exp_rate")) expRt = Double.parseDouble(params.get(k));
-      if (k.equals("speed"))    speed   = Double.parseDouble(params.get(k));
-      if (k.length() >= 4 && k.substring(0,4).equals("stab"))
-        stabFac = Double.parseDouble(params.get(k));
-      if (k.equals("perim_coord"))
-        perimDrctd = Boolean.parseBoolean(params.get(k));
-      if (k.equals("rgf"))
-         gapFillRflx = Boolean.parseBoolean(params.get(k));
-      if (k.toLowerCase().equals("goalx")) goalX = Double.parseDouble(params.get(k));
-      if (k.toLowerCase().equals("goaly")) goalY = Double.parseDouble(params.get(k));
-    } //k
-    System.out.printf("rb = %s\n", dispArray(rb));
-    System.out.printf("kc = %s\n", dispArray(kc));
-    System.out.printf("kr = %s\n", dispArray(kr));
+      if (ks.equals("exp_rate")) expRt  = Double.parseDouble(params.get(ks));
+      if (ks.equals("speed"))    speed  = Double.parseDouble(params.get(ks));
+      if (ks.length() >= 4 && ks.substring(0,4).equals("stab"))
+        stabFac = Double.parseDouble(params.get(ks));
+      if (ks.equals("rgf"))
+        gapFillRflx = Boolean.parseBoolean(params.get(ks));
+      if (ks.equals("gain")) {
+        try {
+          gain = Double.parseDouble(params.get(ks));
+        } catch (NumberFormatException ex) {
+          gain = Double.NaN;
+        }
+      }
+      if (ks.toLowerCase().equals("goal")) {
+        double[] goal = new double[2];
+        get1DArray(params.get(ks), goal); 
+        goalX = goal[0]; goalY = goal[1];
+      }
+    } //ks
+    System.out.printf("rb = %s\n", dispArray(rb, true)); // with delimters.
+    System.out.printf("kc = %s\n", dispArray(kc, true)); //  See persistence sec below
+    System.out.printf("kr = %s\n", dispArray(kr, true));
     System.out.printf("cb = %.10f\n", cb);  
+    System.out.printf("kd = %s, goal = (%.10f,%.10f)\n", dispArray(kd, true), goalX, goalY);  
+    System.out.printf("ka = %s\n", dispArray(ka, true));  
     System.out.printf("kg = %.10f, gap fill reflx = %b\n", kg, gapFillRflx);  
-    System.out.printf("goal = (%.10f,%.10f), kd = %.10f\n", goalX, goalY, kd);  
-    System.out.printf("ob = %.10f, ko = %.10f\n", ob, ko);  
-    System.out.printf("expRt = %.10f, sclg mode = %d\n", expRt, repMode);
+    System.out.printf("rep sclg mode = %d, expRt = %.10f\n", repMode, expRt);
     System.out.printf("speed = %.10f, stb fct = %.10f\n", speed, stabFac);
-    System.out.printf("perimeter directed = %b\n", perimDrctd);
+    System.out.printf("gain = %.10f\n", gain);
   } // setParams
   
+  /** Helper for setParams() - get a double[n] from a text string of n doubles */
+  private void get1DArray(String source, double[] target) {
+    Scanner sc = new Scanner(source);
+    for (int i = 0; i < target.length; i++)
+      target[i] = sc.nextDouble();     
+  }
+  
   /** Helper for setParams() - get a double[m][n] from a text string of m*n doubles */
-  private void getDoubleArray(String source, double[][] target) {
+  private void get2DArray(String source, double[][] target) {
     Scanner sc = new Scanner(source);
     for (int i = 0; i < target.length; i++)
       for (int j = 0; j < target[i].length; j++)
-        target[i][j] = sc.nextDouble();     
+        target[i][j] = sc.nextDouble();
   }
-  
-  /** Helper - build display string for a double[][] */
-  public static String dispArray(double[][] xx) {
-    String s = "";
-    for (int i = 0; i < xx.length; i++)
-      for (int j = 0; j < xx[i].length; j++)
-        s += String.format("%.15f  ", xx[i][j]);
-    return s;
-  }
-
   
   /**
    Initialize state and working data structures: swarm of agents at (xs[], ys[]).
-   Cohesion, repulsion, direction and resultant vector are intially zero. 
-   Goal is at point (goal, goal).
-   Cohesion and repulsion field radii are set to parameters cf, rf respectively. 
-   Cohesion, repulsion, direction weightings are set to kc, kr, kd respectively.
+   Cohesion, repulsion, gap, direction, adversarial and resultant vector are intially zero. 
    Initially, agents are presumed  NOT on perimeter.
    Arrays are created and sized for interagent displacments, distances, polar
-    angles; these are updated befor use.
+    angles; these updated (another function) before use.
   */
   private void  initWorkingData(double[] xs, double[] ys) {
     assert xs.length == ys.length; //num x-coords == num y-coords!
     swmSz = xs.length;
+    
     // swarm state ...
-    state = new double[N_ROWS][swmSz];     
+    posX = new double[swmSz];  posY = new double[swmSz]; 
+    cohX = new double[swmSz];  cohY = new double[swmSz]; 
+    repX = new double[swmSz];  repY = new double[swmSz]; 
+    dirX = new double[swmSz];  dirY = new double[swmSz]; 
+    advX = new double[swmSz];  advY = new double[swmSz]; 
+    gapX = new double[swmSz];  gapY = new double[swmSz]; 
+    resX = new double[swmSz];  resY = new double[swmSz]; 
+
     prm = new int[swmSz];
+    cohN = new int[swmSz];     repN = new int[swmSz];
+
     for (int i = 0; i < swmSz; i++) {
-      state[POS_X][i] = xs[i];  state[POS_Y][i] = ys[i];
-      state[COH_X][i]  = 0.0;   state[COH_Y][i] = 0.0; 
-      state[REP_X][i]  = 0.0;   state[REP_Y][i] = 0.0; 
-      state[DIR_X][i]  = 0.0;   state[DIR_Y][i] = 0.0; 
-      state[RES_X][i]  = 0.0;   state[RES_Y][i] = 0.0; 
-      state[GOAL_X][i] = goalX; state[GOAL_Y][i] = goalY;
-      state[PRM][i] = 0;
-      state[GAP_X][i]  = 0.0;   state[GAP_Y][i] = 0.0; 
-      state[COH_N][i]  = 0;   state[REP_N][i] = 0;
-      prm[i] = 0;
+      posX[i] = xs[i];    posY[i] = ys[i];
+      cohX[i] = 0.0;      cohY[i] = 0.0; 
+      repX[i] = 0.0;      repY[i] = 0.0; 
+      dirX[i] = 0.0;      dirY[i] = 0.0; 
+      advX[i] = 0.0;      advY[i] = 0.0; 
+      gapX[i] = 0.0;      gapY[i] = 0.0; 
+      resX[i] = 0.0;      resY[i] = 0.0; 
+
+      prm[i] = 0;   cohN[i]  = 0;   repN[i] = 0;
     }
-    //Inter-agent data (will be updated before use): 
+    //Inter-agent data (will be updated before use):
     xDiff = new double[swmSz][swmSz];  yDiff  = new double[swmSz][swmSz]; //displacements 
     dists = new double[swmSz][swmSz];  angles = new double[swmSz][swmSz]; //dists, angles
-    nbrs  =  new boolean[swmSz][swmSz]; //[i][j] -> i,j in cohesion range
+    nbrs  =  new boolean[swmSz][swmSz]; //[i][j] -> i attracted by j (cohesion)
     repels = new boolean[swmSz][swmSz]; //[i][j] -> i is repelled by j
   } //initWorkingData
   
@@ -181,10 +184,10 @@ public class SwarmModel {
     initWorkingData(xs, ys);
   } //constructor
 
-  /** 
-   * maintain arrays of interagent displacements distances, polar angles, 
-   * cohesion neighbours data (ecf, state[COH_N])
-   */
+
+  /* Update model state *******************************************************/
+
+  /** maintain arrays of interagent displacements distances, polar angles, coh, rep data */
   void updtWorkingData() {
     double theta;
     // Interagent displacements, distances, angles, eff coh radii, nbrs
@@ -194,9 +197,9 @@ public class SwarmModel {
       nbrs[i][i] = false;   repels[i][i] = false;
       
       for (int j = 0; j < i; j++) {
-        xDiff[i][j]  = state[POS_X][i] - state[POS_X][j];
+        xDiff[i][j]  = posX[i] - posX[j];
         xDiff[j][i]  = -xDiff[i][j];
-        yDiff[i][j]  = state[POS_Y][i] - state[POS_Y][j];
+        yDiff[i][j]  = posY[i] - posY[j];
         yDiff[j][i]  = -yDiff[i][j];
         dists[i][j]  = Math.hypot(xDiff[i][j], yDiff[i][j]);
         dists[j][i]  = dists[i][j]; //
@@ -206,39 +209,44 @@ public class SwarmModel {
       } //j
     } //i
     for (int i = 0; i < swmSz; i++) {
-      state[COH_N][i] = 0;
+      cohN[i] = 0;
       for (int j = 0; j < swmSz; j++) {
-        nbrs[i][j] = (j != i && dists[i][j] <= cb); 
-        if (nbrs[i][j]) 
-          state[COH_N][i]++;
-        repels[i][j] = (j != i && dists[i][j] <= rb[prm[i]][prm[j]]); 
+        if (j == i) continue;
+        nbrs[i][j] = (dists[i][j] <= cb);
+        if (nbrs[i][j])  cohN[i]++;
       }
     } //i
 
-    // Perimeter status
+    // Perimeter status and repellors
     updateprm();
+    for (int i = 0; i < swmSz; i++) {
+      repels[i][i] = false;
+      for (int j = 0; j < swmSz; j++) {
+        if (j == i) continue;
+        repels[i][j] = (dists[i][j] <= rb[prm[i]][prm[j]]); 
+      }
+    }
   } //updtWorkingData()
 
 
   /** Called by updtWorkingData()
-   *  Update perimeter status state[PRM] of all agents in swarm.
-   *  Also update gapclosing vectors state[GAP_X][], state[GAP_Y  ][]. 
-   *  Assumes xDiff, yDiff, dists, angles, and COH_N are up to date.
-   */
+   *  Update perimeter status prm[] of all agents in swarm.
+   *  Also update gapclosing vectors gapX[], gapY[]. 
+   *  Assumes xDiff, yDiff, dists, angles, and cohN[] are up to date. */
   void updateprm() {
     for (int i = 0; i < swmSz; i++) {
       prm[i] = 0;
-      state[GAP_X][i] = 0.0; state[GAP_Y][i] = 0.0;
-      int k = (int)state[COH_N][i];
-      if (k < 3) {
+      gapX[i] = 0.0; gapY[i] = 0.0; 
+      if (cohN[i] < 3) {
         prm[i] = 1;   //under 3 nbrs => perimeter
         continue;         //next i
       }
-      int[] iNbrs = new int[k];  // //coh nbrs of agent i
-      k = 0;
+      int[] iNbrs = new int[cohN[i]];  //coh nbrs of agent i
+      int k = 0;
       for (int j=0; j<swmSz; j++) {
         if (j != i && nbrs[j][i]) {
-          iNbrs[k] = j; k++;
+          iNbrs[k] = j;
+          k++;
         }
       }
       
@@ -247,28 +255,23 @@ public class SwarmModel {
         k = (j+1) % iNbrs.length;
         if (!nbrs[iNbrs[k]][iNbrs[j]]) { 
           prm[i] = 1;  //two consec nbrs out of coh range => prm[i]
-          state[GAP_X][i] = kg *
-            (0.5*(state[POS_X][iNbrs[k]] + state[POS_X][iNbrs[j]]) - state[POS_X][i]);
-          state[GAP_Y][i] = kg *
-            (0.5*(state[POS_Y][iNbrs[k]] + state[POS_Y][iNbrs[j]]) - state[POS_Y][i]);
+          gapX[i] += kg * (0.5*(posX[iNbrs[k]] + posX[iNbrs[j]]) - posX[i]);
+          gapY[i] += kg * (0.5*(posY[iNbrs[k]] + posY[iNbrs[j]]) - posY[i]);
          break; // abandon j-loop
-        }       // else ...
+        }
+        // else ...
         double delta = angles[i][iNbrs[k]] - angles[i][iNbrs[j]];
         if (delta < 0) delta += Math.PI * 2;
         if (delta > Math.PI) { //two consec nbrs make a reflex angle
           prm[i] = 1;
           if (gapFillRflx) {
-            state[GAP_X][i] = kg *
-              (0.5*(state[POS_X][iNbrs[k]] + state[POS_X][iNbrs[j]]) - state[POS_X][i]);
-            state[GAP_Y][i] = kg *
-              (0.5*(state[POS_Y][iNbrs[k]] + state[POS_Y][iNbrs[j]]) - state[POS_Y][i]);
+            gapX[i] += kg * (0.5*(posX[iNbrs[k]] + posX[iNbrs[j]]) - posX[i]);
+            gapY[i] += kg * (0.5*(posY[iNbrs[k]] + posY[iNbrs[j]]) - posY[i]);
           }
           break;
         }
       } // end for j
     } // end for i
-    for (int i = 0; i < swmSz; i++)
-      state[PRM][i] = (double)prm[i];
   } // updateprm()
 
   /** Helper: sort neighbours of agent i 
@@ -290,165 +293,206 @@ public class SwarmModel {
   /** Compute COH components assuming working data is up to date */
   void computeCOH() {
     for (int i = 0; i < swmSz; i++) {
-      state[COH_X][i] = 0.0; state[COH_Y][i] = 0.0;
+      cohX[i] = 0.0; cohY[i] = 0.0;
       for (int j = 0; j < swmSz; j++)
         if (nbrs[j][i]) {
-          state[COH_X][i] += (xDiff[j][i] * kc[prm[i]][prm[j]]);
-          state[COH_Y][i] += (yDiff[j][i] * kc[prm[i]][prm[j]]);
+          cohX[i] += (xDiff[j][i] * kc[prm[i]][prm[j]]);
+          cohY[i] += (yDiff[j][i] * kc[prm[i]][prm[j]]);
         }
-      if (state[COH_N][i] > 0) {
-        state[COH_X][i] /= state[COH_N][i];
-        state[COH_Y][i] /= state[COH_N][i];
+      if (cohN[i] > 0) {    //in David's jl, this is postponed to compute_step()
+        cohX[i] /= cohN[i];  cohY[i] /= cohN[i];
       }
     }
   } //computeCOH()
   
-  /** Compute COH components assuming working data is up to date
-   *  LINEAR mode */
+  /** Compute COH components assuming working data inc repels[] is up to date 
+   *  LINEAR mode */ 
   void computeREP_lin() {
     for (int i = 0; i < swmSz; i++) {
-      state[REP_N][i] = 0; state[REP_X][i] = 0.0; state[REP_Y][i] = 0.0; 
+      repN[i] = 0; repX[i] = 0.0; repY[i] = 0.0; 
       for (int j = 0; j < swmSz; j++) {
-        if (!repels[i][j]) 
-          continue;
-        state[REP_N][i] += 1;
-        state[REP_X][i] += (1 - (rb[prm[i]][prm[j]]/dists[j][i]))*xDiff[j][i]*kr[prm[i]][prm[j]];
-        state[REP_Y][i] += (1 - (rb[prm[i]][prm[j]]/dists[j][i]))*yDiff[j][i]*kr[prm[i]][prm[j]];
+        if (!repels[i][j])  continue;
+        repN[i] += 1;
+        repX[i] += (1.0 - (rb[prm[i]][prm[j]]/dists[j][i]))*xDiff[j][i]*kr[prm[i]][prm[j]];
+        repY[i] += (1.0 - (rb[prm[i]][prm[j]]/dists[j][i]))*yDiff[j][i]*kr[prm[i]][prm[j]];
       } //j
-      if (state[REP_N][i] >= 1) {
-        state[REP_X][i] /= state[REP_N][i]; state[REP_Y][i] /= state[REP_N][i];
+      if (repN[i] >= 1) {   //in David's jl, this is postponed to compute_step()
+        repX[i] /= repN[i]; repY[i] /= repN[i];
       }
     } //i
   } //computeREP_lin()
 
-  /** Compute COH components assuming working data is up to date
-   *  QUAD mode */
+  /*  QUAD mode */
   void computeREP_quad() {
     double dd;
     for (int i = 0; i < swmSz; i++) {
-      state[REP_N][i] = 0; state[REP_X][i] = 0.0; state[REP_Y][i] = 0.0; 
+      repN[i] = 0; repX[i] = 0.0; repY[i] = 0.0; 
       for (int j = 0; j < swmSz; j++) {
         if (!repels[i][j]) 
           continue;
-        state[REP_N][i] += 1;
+        repN[i] += 1;
         dd = dists[j][i];
-        state[REP_X][i] -= rb[prm[i]][prm[j]]/dd/dd * xDiff[j][i]/dd * kr[prm[i]][prm[j]];
-        state[REP_Y][i] -= rb[prm[i]][prm[j]]/dd/dd * yDiff[j][i]/dd * kr[prm[i]][prm[j]];
+        repX[i] -= rb[prm[i]][prm[j]]/dd/dd * xDiff[j][i]/dd * kr[prm[i]][prm[j]];
+        repY[i] -= rb[prm[i]][prm[j]]/dd/dd * yDiff[j][i]/dd * kr[prm[i]][prm[j]];
       } //j
-      if (state[REP_N][i] >= 1) {
-        state[REP_X][i] /= state[REP_N][i]; state[REP_Y][i] /= state[REP_N][i];
+      if (repN[i] >= 1) {   //in David's jl, this is postponed to compute_step()
+        repX[i] /= repN[i]; repY[i] /= repN[i];
       }
     } //i
   } //computeREP_quad()
 
-  /** Compute COH components assuming working data is up to date
-   *  EXPONENTIAL mode */
+  /*  EXPONENTIAL mode */
   void computeREP_exp() {
     double dd;
     for (int i = 0; i < swmSz; i++) {
-      state[REP_N][i] = 0; state[REP_X][i] = 0.0; state[REP_Y][i] = 0.0; 
+      repN[i] = 0; repX[i] = 0.0; repY[i] = 0.0; 
       for (int j = 0; j < swmSz; j++) {
         if (!repels[i][j]) 
           continue;
-        state[REP_N][i] += 1;
+        repN[i] += 1;
         dd = dists[j][i];
-        state[REP_X][i] -= rb[prm[i]][prm[j]]*Math.exp(-dd*expRt) * xDiff[j][i]/dd * kr[prm[i]][prm[j]];
-        state[REP_Y][i] -= rb[prm[i]][prm[j]]*Math.exp(-dd*expRt) * yDiff[j][i]/dd * kr[prm[i]][prm[j]];
+        repX[i] -= rb[prm[i]][prm[j]]*Math.exp(-dd*expRt) * xDiff[j][i]/dd * kr[prm[i]][prm[j]];
+        repY[i] -= rb[prm[i]][prm[j]]*Math.exp(-dd*expRt) * yDiff[j][i]/dd * kr[prm[i]][prm[j]];
       } //j
-      if (state[REP_N][i] >= 1) {
-        state[REP_X][i] /= state[REP_N][i]; state[REP_Y][i] /= state[REP_N][i];
+      if (repN[i] >= 1) {   //in David's jl, this is postponed to compute_step()
+        repX[i] /= repN[i]; repY[i] /= repN[i];
       }
     } //i
   } //computeREP_exp()
   
+  void computeDIR() {
+    for (int i = 0; i < swmSz; i++) {
+      dirX[i] = kd[prm[i]]*(goalX - posX[i]);
+      dirY[i] = kd[prm[i]]*(goalY - posY[i]);
+    }
+  }
+  
+  void computeADV(double α) {
+    for (int i = 0; i < swmSz; i++) {
+      advX[i] = ka[prm[i]] * (Math.cos(α)*dirX[i] - Math.sin(α)*dirY[i]);
+      advY[i] = ka[prm[i]] * (Math.sin(α)*dirX[i] + Math.cos(α)*dirY[i]);
+    }
+  }
 
-  /**  Compute one step in the evolution of swarm. 
+
+  /**  Compute one step in the evolution of swarm.
    * Param speed is the number of simulation distance units per simulation step.
    */
   void computeStep(double speed) {
-    updtWorkingData(); // xDiff, yDiff, dists, angles, , nbrs, perim,
-    computeCOH();      // Updates state[COH_X], state[COH_Y] including weights
+    updtWorkingData(); // xDiff, yDiff, dists, angles, , nbrs, perim, repels, cohN
+    computeCOH();      // Updates cohX, cohY using weights
 
-    if (repMode == LINEAR)  // state[REP_X], state[REP_Y] including weights
+    if (repMode == LINEAR)  // repX, repY
       computeREP_lin();
     else if (repMode == QUAD)
       computeREP_quad();
     else if (repMode == EXPTL)
       computeREP_exp();
     
+    computeDIR();
+    computeADV(Math.PI/2);
+
+    // compute resultant
     for (int i = 0; i < swmSz; i++) {
-      state[DIR_X][i] = kd*(state[GOAL_X][i] - state[POS_X][i]);
-      state[DIR_Y][i] = kd*(state[GOAL_Y][i] - state[POS_Y][i]);
+      resX[i] = cohX[i] + repX[i] + gapX[i] + dirX[i] + advX[i];
+      resY[i] = cohY[i] + repY[i] + gapY[i] + dirY[i] + advY[i];
 
-      // Resultant of the cohesion, repulsion and direction vectors:
-      if (!perimDrctd || prm[i] == 1) {
-        state[RES_X][i]
-          = state[COH_X][i] + state[GAP_X][i] + state[REP_X][i] + state[DIR_X][i];
-        state[RES_Y][i]
-          = state[COH_Y][i] + state[GAP_Y][i] + state[REP_Y][i] + state[DIR_Y][i];
-      } else {
-        state[RES_X][i] = state[COH_X][i] + state[GAP_X][i] + state[REP_X][i];
-        state[RES_Y][i] = state[COH_Y][i] + state[GAP_Y][i] + state[REP_Y][i];
+      if (Double.isNaN(gain)) { //normalise resultant
+        double mag = Math.hypot(resX[i], resY[i]);
+        if (mag > stabFac * speed) {
+          resX[i] *= speed/mag; resY[i] *= speed/mag;
+        } else {
+          resX[i] = 0;  resY[i] *= 0; 
+        }
       }
-
-      double magRES = Math.hypot(state[RES_X][i], state[RES_Y][i]);
-      if (magRES > stabFac * speed) {
-        state[RES_X][i] *= speed/magRES;
-        state[RES_Y][i] *= speed/magRES; 
-      } else {
-        state[RES_X][i] *= 0;
-        state[RES_Y][i] *= 0; 
-      }
+      else {  //scale resultant by gain
+          resX[i] *= gain; resY[i] *= gain;      
+      }  
     } //i
   } //computeStep
 
 
   void applyStep() {
     for (int i = 0; i < swmSz; i++) {
-      state[POS_X][i] += state[RES_X][i];
-      state[POS_Y][i] += state[RES_Y][i];
-      state[POS_X][i] = Math.rint(state[POS_X][i] * snapRdg)/snapRdg;
-      state[POS_Y][i] = Math.rint(state[POS_Y][i] * snapRdg)/snapRdg;
+      posX[i] = Math.rint((posX[i] + resX[i]) * snapRdg)/snapRdg;
+      posY[i] = Math.rint((posY[i] + resY[i]) * snapRdg)/snapRdg;
     }
   } //applyStep
   
   
+  /* Persistence methods *****************************************************/
   void saveState(String path) throws IOException {
     PrintWriter ptwr = new PrintWriter(new FileWriter(path));
-    for (int i = 0; i < swmSz; i++) {
-      for (int k = 0; k < N_ROWS; k++) 
-        ptwr.printf("%.15f  ", state[k][i]);
-      ptwr.println();
-    }
+    for (int i = 0; i < swmSz; i++)
+      ptwr.println(stateStg(i)); //better without legend? Or optional?
     ptwr.close();
   }
   
+  /* Helper to saveState() ***************/
+  public String stateStg(int agt) {
+    StringBuilder sb = new StringBuilder();
+    sb.append(String.format("POS=(%.10f,%.10f); ", posX[agt], posY[agt]));
+    sb.append(String.format("COH=(%.10f,%.10f); ", cohX[agt], cohY[agt]));
+    sb.append(String.format("REP=(%.10f,%.10f); ", repX[agt], repY[agt]));
+    sb.append(String.format("DIR=(%.10f,%.10f); ", dirX[agt], dirY[agt]));
+    sb.append(String.format("ADV=(%.10f,%.10f); ", advX[agt], advY[agt]));
+    sb.append(String.format("GAP=(%.10f,%.10f); ", gapX[agt], gapY[agt]));
+    sb.append(String.format("RES=(%.10f,%.10f); ", resX[agt], resY[agt]));
+    sb.append(String.format("%d nbrs, %s rplrs; ", cohN[agt], repN[agt]));
+    sb.append(String.format("PRM=%d  ",prm[agt]));
+    return sb.toString();
+  }
+
 
   void saveSwarm(String path) throws IOException {
     PrintWriter ptwr = new PrintWriter(new FileWriter(path));
-    ptwr.println(String.format("kc: %s", dispArray(kc)));
-    ptwr.println(String.format("kr: %s", dispArray(kr)));
-    ptwr.println(String.format("rb: %s", dispArray(rb)));
-    ptwr.println(String.format("cb: %.15f", cb));
-    ptwr.println(String.format("ob: %.15f", ob));
-    ptwr.println(String.format("kd: %.15f", kd));
-    ptwr.println(String.format("ko: %.15f", ko));
-    ptwr.println(String.format("kg: %.15f", kg));
-    ptwr.println(String.format("exp:_rate %.15f", expRt));
+    ptwr.println(String.format("kc: %s", dispArray(kc, false)));
+    ptwr.println(String.format("kr: %s", dispArray(kr, false)));
+    ptwr.println(String.format("rb: %s", dispArray(rb, false)));
+    ptwr.println(String.format("cb: %.10f", cb));
+    ptwr.println(String.format("kd: %s", dispArray(kd, false)));
+    ptwr.println(String.format("ka: %s", dispArray(ka, false)));
+    ptwr.println(String.format("kg: %.10f", kg));
+    ptwr.println(String.format("exp_rate: %.10f", expRt));
     ptwr.println(String.format("scaling: %s",
         repMode==2? "expo": (repMode==1?"quad":"linear")));
-    ptwr.println(String.format("speed: %.15f", speed));
-    ptwr.println(String.format("stab: %.15f", stabFac));
-    ptwr.println(String.format("goalX: %.15f", goalX));
-    ptwr.println(String.format("goalY: %.15f", goalY));
-    ptwr.println(String.format("perim_coord: %b", perimDrctd));
+    ptwr.println(String.format("speed: %.10f", speed));
+    ptwr.println(String.format("stab: %.10f", stabFac));
+    ptwr.println(String.format("gain: %.10f", gain));
+    ptwr.println(String.format("goal: %.10f %.10f", goalX, goalY));
     ptwr.println("# POS_X, POS_Y --");
     for (int i = 0; i < swmSz; i++)
-      ptwr.println(String.format("%.15f  %.15f", state[POS_X][i], state[POS_Y][i]));
+      ptwr.println(String.format("%.15f  %.15f", posX[i], posY[i]));
     ptwr.close();
   }
 
-  /** Unpack model data from a config file & build model */
+  /** Helper - make save/display string for a double[] */
+  public static String dispArray(double[] xx, boolean delim) {
+    StringBuilder sb = new StringBuilder();
+    if (delim) sb.append("[");
+    for (int i = 0; i < xx.length; i++)
+      sb.append(String.format("%.10f ", xx[i]));
+    sb.deleteCharAt(sb.length()-1);
+    if (delim) sb.append("]");
+    return sb.toString();
+  }
+
+  /** Helper - make save/display string for a double[][] */
+  public static String dispArray(double[][] xx, boolean delim) {
+    StringBuilder sb = new StringBuilder();
+    if (delim) sb.append("[");
+    for (int i = 0; i < xx.length; i++) {
+      for (int j = 0; j < xx[i].length; j++)
+        sb.append(String.format("%.10f ", xx[i][j]));
+      if (delim && i < xx.length - 1)
+        sb.append("/ ");
+    }
+    if (delim) sb.append("]");
+    return sb.toString();
+  }
+  
+
+  /** Unpack model data from a flat config file & build model */
   public static SwarmModel loadSwarmFlat(String path)
                     throws IOException, NumberFormatException {
     Map<String, String> params = new HashMap<String, String>();
@@ -465,6 +509,7 @@ public class SwarmModel {
     }
     if (line.charAt(0) == '#')
       line = fr.readLine();
+    System.out.println("parameters read");
     while (line != null) {                    //swarm coords section
       tokens = line.split("\\s+");
       if (tokens.length >= 2) {
@@ -473,13 +518,17 @@ public class SwarmModel {
       line = fr.readLine();
     }
     fr.close();
+    System.out.println("file read\n");
+
     assert(xLst.size() == yLst.size());
     double[] xs = new double[xLst.size()],
              ys = new double[yLst.size()];
     for (String s: xLst) xs[xLst.indexOf(s)] = Double.parseDouble(s);
     for (String s: yLst) ys[yLst.indexOf(s)] = Double.parseDouble(s);
+    
     return new SwarmModel(xs, ys, params); 
   } //end loadSwarmFlat(..)
+
 
   /** Unpack model data from a Json file & build model */
   public static SwarmModel loadSwarmJson(String path) 
@@ -488,10 +537,10 @@ public class SwarmModel {
     
     JSONObject jprms = json.getJSONObject("params");
     Map<String, String> params = new HashMap<String, String>();
-    Iterator<String> itn = jprms.keys();    //Type-safety bug in org.json.jar!
-                    // RHS returns an Iterator rather than an Iterator<String>
+    Iterator itn = jprms.keys();    //Type-safety bug in org.json.jar!
+                                    // RHS returns an Iterator rather than an Iterator<String>
     while (itn.hasNext()) {
-      String key = itn.next();
+      String key = (String)itn.next(); //.... hence this kludge
       String val = dropPunctn(jprms.getString(key));
       params.put(key, val);
     }      
@@ -536,6 +585,15 @@ public class SwarmModel {
     }
     return sb.toString();
   }
- 
+
+/** NOTE
+  * Goal parameter currently treated as a single 2D point, represented knternally as
+  * goalX, goalY loaded and saved (flat) as a double[2]. Note sure how Json will 
+  * handle this as we arenot currently using it. Wait and see.
+  *
+  * Similarly, there used to be goal coordinates in the state but not any more: 
+  * they do not figure in current investigations and in any case, might in the
+  * future need to be handled differently.
+  */
 } // end class
 

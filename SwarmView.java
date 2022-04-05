@@ -25,7 +25,7 @@ public class SwarmView extends JPanel implements
 
   //Controls
   JPanel pnlCtrl;
-  JButton btnRunPse, btnStep, btnSlwr, btnFstr, btnZoomIn, btnZoomOut, btnDmpSt;
+  JButton btnRunPse, btnStep, btnSlwr, btnFstr, btnZoomIn, btnZoomOut, btnDmpSt, btnSvSwm;
   JCheckBox chkCohLns, chkFnGrd;
   JLabel lblCrds, lblStep, lblScFct, lblTmrInt;
   JTextField txtRunLim;
@@ -59,6 +59,9 @@ public class SwarmView extends JPanel implements
     btnZoomIn.addActionListener(this);
     btnDmpSt = new JButton("Dump state");  pnlCtrl.add(btnDmpSt);
     btnDmpSt.addActionListener(this);
+    btnSvSwm = new JButton("Save swarm");  pnlCtrl.add(btnSvSwm);
+    btnSvSwm.addActionListener(this);
+
     chkCohLns = new JCheckBox("Show Coh", false);  pnlCtrl.add(chkCohLns);
     chkCohLns.addActionListener(this);
     chkFnGrd =  new JCheckBox("Fine grid", true);  pnlCtrl.add(chkFnGrd);
@@ -131,7 +134,7 @@ public class SwarmView extends JPanel implements
       if (Math.hypot(model.getX(i) * scFact +ORG - e.getX(),
                     -model.getY(i) * scFact +ORG - e.getY()) < 5) {
         System.out.printf("Agent %d at (%f, %f) has %d neighbours:\n\t",
-          i, model.getX(i), model.getY(i), (int)model.state[model.COH_N][i]);
+          i, model.getX(i), model.getY(i), (int)model.cohN[i]);
         for (int j = 0; j < model.swmSz; j++) 
           if (model.nbrs[i][j])
             System.out.printf(
@@ -142,8 +145,7 @@ public class SwarmView extends JPanel implements
             System.out.printf(
               "%d:%f ∟ %.1f; ", j, model.dists[i][j], model.angles[i][j]*180/Math.PI);
         System.out.println();
-        }
-     
+        }     
   }
 
   public void focusGained(FocusEvent e) {}
@@ -210,6 +212,14 @@ public class SwarmView extends JPanel implements
         JFileChooser chsr = new JFileChooser(".");
         if (chsr.showSaveDialog(this) == JFileChooser.APPROVE_OPTION)
           model.saveState(chsr.getSelectedFile().getPath());
+      } catch (IOException x) {
+        System.err.println(x);
+      }
+    } else if (src == btnSvSwm) {
+      try {
+        JFileChooser chsr = new JFileChooser(".");
+        if (chsr.showSaveDialog(this) == JFileChooser.APPROVE_OPTION)
+          model.saveSwarm(chsr.getSelectedFile().getPath());
       } catch (IOException x) {
         System.err.println(x);
       }
