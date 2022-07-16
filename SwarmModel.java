@@ -30,11 +30,12 @@ public class SwarmModel {
   double[][] rb = {{2.0,2.0},{2.0,2.0}},      //repulsion radii
              kc = {{0.15,0.15},{0.15,0.15}},  //cohesion weights
              kr = {{50.0,50.0},{50.0,50.0}};  //repulsion weights
-  double     cb  = 3.0,           //master cohesion range (radius)
+  double     cb  = 3.0,                       //cohesion range (radius)
              goalX = 0.0, goalY = 0.0;
-  double[]   kd  = {0.0,0.0},     //master direction weight
-             ka  = {0.0,0.0};     //master adversarial weight 
-  double     kg  = 0.0,           //master gap reduction wt, default 0.0
+  double[]   kd  = {0.0,0.0},                 //direction weight
+             ka  = {0.0,0.0},                 //adversarial weight 
+             ra  = {Math.PI/2,Math.PI/2};     //adversarial angles 
+  double     kg  = 0.0,           //gap reduction wt, default 0.0
              expRt = 0.2,         //exponential rate (if rep mode == EXPTL)
              speed = 0.05,        //model time-step size
              stabFac = 0.0,       //minimum magnitude for RES to be applied
@@ -61,6 +62,7 @@ public class SwarmModel {
       if (ks.equals("cb"))  cb = Double.parseDouble(params.get(ks));
       if (ks.equals("kd"))  get1DArray(params.get(ks), kd); 
       if (ks.equals("ka"))  get1DArray(params.get(ks), ka); 
+      if (ks.equals("ra"))  get1DArray(params.get(ks), ra); 
       if (ks.equals("kg"))  kg = Double.parseDouble(params.get(ks));
       if (ks.equals("scaling")) {
         if (params.get(ks).substring(0,4).equals("expo"))
@@ -94,10 +96,12 @@ public class SwarmModel {
     System.out.printf("cb = %.10f\n", cb);  
     System.out.printf("kd = %s, goal = (%.10f,%.10f)\n", dispArray(kd, true), goalX, goalY);  
     System.out.printf("ka = %s\n", dispArray(ka, true));  
+    System.out.printf("ra = %s\n", dispArray(ra, true));  
     System.out.printf("kg = %.10f, gap fill reflx = %b\n", kg, gapFillRflx);  
     System.out.printf("rep sclg mode = %d, expRt = %.10f\n", repMode, expRt);
     System.out.printf("speed = %.10f, stb fct = %.10f\n", speed, stabFac);
     System.out.printf("gain = %.10f\n", gain);
+    System.out.printf("goal = %.10f, %.10f\n", goalX, goalY);
   } // setParams
   
   /** Helper for setParams() - get a double[n] from a text string of n doubles */
@@ -231,7 +235,7 @@ public class SwarmModel {
 
   /** Called by updtWorkingData()
    *  Update perimeter status prm[] of all agents in swarm.
-   *  Also update gapclosing vectors gapX[], gapY[]. 
+   *  Also update gap closing vectors gapX[], gapY[]. 
    *  Assumes xDiff, yDiff, dists, angles, and cohN[] are up to date. */
   void updateprm() {
     for (int i = 0; i < swmSz; i++) {
@@ -367,10 +371,21 @@ public class SwarmModel {
     }
   }
   
-  void computeADV(double α) {
+  /**
+   * The DIR vector may be zero, and is always when the ka parameter is 0;
+   * Normalising a zero DIR makesnosense so just set ADV to 0 in this case.
+   */
+  void computeADV() {
     for (int i = 0; i < swmSz; i++) {
-      advX[i] = ka[prm[i]] * (Math.cos(α)*dirX[i] - Math.sin(α)*dirY[i]);
-      advY[i] = ka[prm[i]] * (Math.sin(α)*dirX[i] + Math.cos(α)*dirY[i]);
+      double magDir = Math.hypot(dirX[i], dirY[i]), nDirX, nDirY, α;
+      if (magDir == 0.0) {
+        advX[i] = 0.0; advY[i] = 0.0;       
+      } else {
+        nDirX  = dirX[i]/magDir;  nDirY  = dirY[i]/magDir;
+        α = ra[prm[i]];
+        advX[i] = ka[prm[i]] * (Math.cos(α)*nDirX - Math.sin(α)*nDirY);
+        advY[i] = ka[prm[i]] * (Math.sin(α)*nDirX + Math.cos(α)*nDirY);
+      }
     }
   }
 
@@ -390,7 +405,7 @@ public class SwarmModel {
       computeREP_exp();
     
     computeDIR();
-    computeADV(Math.PI/2);
+    computeADV();
 
     // compute resultant
     for (int i = 0; i < swmSz; i++) {
@@ -402,11 +417,11 @@ public class SwarmModel {
         if (mag > stabFac * speed) {
           resX[i] *= speed/mag; resY[i] *= speed/mag;
         } else {
-          resX[i] = 0;  resY[i] *= 0; 
+          resX[i] *= 0;  resY[i] *= 0; 
         }
       }
       else {  //scale resultant by gain
-          resX[i] *= gain; resY[i] *= gain;      
+        resX[i] *= gain; resY[i] *= gain;      
       }  
     } //i
   } //computeStep
@@ -452,6 +467,7 @@ public class SwarmModel {
     ptwr.println(String.format("cb: %.10f", cb));
     ptwr.println(String.format("kd: %s", dispArray(kd, false)));
     ptwr.println(String.format("ka: %s", dispArray(ka, false)));
+    ptwr.println(String.format("ra: %s", dispArray(ra, false)));
     ptwr.println(String.format("kg: %.10f", kg));
     ptwr.println(String.format("exp_rate: %.10f", expRt));
     ptwr.println(String.format("scaling: %s",
@@ -549,8 +565,8 @@ public class SwarmModel {
     try {
       JSONArray dsts = json.getJSONObject("destinations").getJSONArray("coords");
       if (dsts.getJSONArray(0).length() > 0 && dsts.getJSONArray(1).length() > 0) {
-        params.put("goalX", dsts.getJSONArray(0).getString(0));
-        params.put("goalY", dsts.getJSONArray(1).getString(0));
+        params.put("goal", dsts.getJSONArray(0).getString(0) + " " + dsts.getJSONArray(1).getString(0));
+        //System.out.printf("goal: %s %s\n", dsts.getJSONArray(0).getString(0), dsts.getJSONArray(1).getString(0));
       }
     } catch (JSONException ex) {
       System.out.printf(
@@ -586,14 +602,17 @@ public class SwarmModel {
     return sb.toString();
   }
 
-/** NOTE
-  * Goal parameter currently treated as a single 2D point, represented knternally as
-  * goalX, goalY loaded and saved (flat) as a double[2]. Note sure how Json will 
-  * handle this as we arenot currently using it. Wait and see.
-  *
-  * Similarly, there used to be goal coordinates in the state but not any more: 
-  * they do not figure in current investigations and in any case, might in the
-  * future need to be handled differently.
-  */
 } // end class
+
+
+/** NOTE on goals (destinations)
+  * Goal parameter currently treated as a single 2D point, represented internally as
+  * goalX, goalY loaded and saved (flat) as a double[2].
+  *  Json currently puts this data in "destinations": {"coords": [ [x], [y], [z] ]}
+  *  - this may change.
+  *
+  * There used to be goal coordinates in the agent state but we have so far always 
+  * had a single goal for all agents. The model as described in the perimeter control
+  * paper implicitly treats a goal in this fashion also, as does the json format.
+  */
 
