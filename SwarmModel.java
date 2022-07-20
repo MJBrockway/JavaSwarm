@@ -405,7 +405,8 @@ public class SwarmModel {
       computeREP_exp();
     
     computeDIR();
-    computeADV();
+    if (kd[0] != 0.0 || kd[1] != 0.0)
+      computeADV();
 
     // compute resultant
     for (int i = 0; i < swmSz; i++) {
